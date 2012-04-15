@@ -111,6 +111,73 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
     dXor3 true refl = sym (dNot _)
     dXor3 false refl = refl
 
+    _[_:=_] : {A : Set}{n : ℕ} → Vec A n → Fin n → (A → A) → Vec A n
+    []       [ ()    := f ]
+    (x ∷ xs) [ zero  := f ] = f x ∷ xs
+    (x ∷ xs) [ suc i := f ] = x ∷ xs [ i := f ]
+
+    flip : {n : ℕ} → Fin n → Vec Bool n → Vec Bool n
+    flip i xs = xs [ i := not ]
+
+    data _·_∈_ {A : Set}(x : A) : {n : ℕ} → ℕ → Vec A n → Set where
+      []  : x · 0 ∈ []
+      x∷_ : {n : ℕ}{occ : ℕ}{xs : Vec A n} → x · occ ∈ xs → x · (suc occ) ∈ (x ∷ xs)
+      _∷_ : {n : ℕ}{occ : ℕ}{y : A}{xs : Vec A n} → x ≢ y → x · occ ∈ xs → x · occ ∈ (y ∷ xs)
+  
+    _∉_ : {A : Set}{n : ℕ} → A → Vec A n → Set
+    x ∉ xs = x · 0 ∈ xs
+
+    _U∈_ : {A : Set}{n : ℕ} → A → Vec A n → Set
+    x U∈ xs = x · 1 ∈ xs
+
+
+    lookupFalse : {A : Set}(x : A){n : ℕ} → (i : Fin n) → lookup i (replicate x) ≡ x 
+    lookupFalse x zero = refl
+    lookupFalse x (suc i) = lookupFalse x i
+
+    lookup[:=] : {A : Set}{n : ℕ}(f : A → A)(i : Fin n)(xs : Vec A n) → lookup i (xs [ i := f ]) ≡ f (lookup i xs)
+    lookup[:=] f zero    (x ∷ xs) = refl
+    lookup[:=] f (suc i) (x ∷ xs) = lookup[:=] f i xs
+
+    lookupFlip : {n : ℕ}(x : Fin n)(xs : Vec Bool n) → lookup x (flip x xs) ≡ not (lookup x xs)
+    lookupFlip = lookup[:=] not
+
+    open import Data.Empty
+
+    lookup≢[:=] : {A : Set}{n : ℕ}(f : A → A)(x y : Fin n)(xs : Vec A n) → x ≢ y → lookup x (xs [ y := f ]) ≡ lookup x xs
+    lookup≢[:=] _ zero zero (x ∷ xs) x≢y = ⊥-elim (x≢y refl)
+    lookup≢[:=] _ zero (suc y) (x ∷ xs) x≢y = refl
+    lookup≢[:=] _ (suc x) zero (x₁ ∷ xs) x≢y = refl
+    lookup≢[:=] f (suc x) (suc y) (x₁ ∷ xs) x≢y = lookup≢[:=] f x y xs (rmSuc x y x≢y)
+
+    lookupDis : {n : ℕ}(x y : Fin n)(xs : Vec Bool n) → x ≢ y → lookup x (flip y xs) ≡ lookup x xs
+    lookupDis = lookup≢[:=] not
+
+    tabLem : {A : Set}{n : ℕ}(i : Fin n)(f : Fin n → A) → f i ≡ lookup i (tabulate f)
+    tabLem zero f    = refl
+    tabLem (suc i) f = tabLem i (λ x → f (suc x))
+
+    inAll≡ : {n : ℕ}(i : Fin n) → i ≡ lookup i (allFin n)
+    inAll≡ i = tabLem i (λ x → x)
+
+    notIn : {A : Set}{n : ℕ}{x : A}(xs : Vec A n) → ((j : Fin n) → x ≢ lookup j xs) → x ∉ xs
+    notIn [] fun = []
+    notIn (x₁ ∷ xs) fun = (fun zero) ∷ (notIn xs (λ j → fun (suc j)))
+
+    isIn : {A : Set}{n : ℕ}{x : A}(i : Fin n)(xs : Vec A n) → ((j : Fin n) → x ≡ lookup j xs → i ≡ j) → x ≡ lookup i xs → x U∈ xs
+    isIn (zero {n}) (x₁ ∷ xs) neq refl = x∷ (notIn xs fun) where
+      fun : (j : Fin n) → x₁ ≢ lookup j xs
+      fun j eq with neq (suc j) eq
+      ... | ()
+    isIn {A} (suc {n} i) (x₁ ∷ xs) neq eq = _∷_ (x≢x₁ neq) (isIn i xs (λ j x → rmSuc≡ (neq (suc j) x)) eq) where
+      x≢x₁ : ∀ {x x₁ : A} → ((j : Fin (suc n)) → x ≡ lookup j (x₁ ∷ xs) → suc i ≡ j) → x ≢ x₁
+      x≢x₁ neq' refl with neq' zero refl
+      x≢x₁ neq' refl | ()
+
+    inAll : {n : ℕ}(i : Fin n) → i U∈ allFin n
+    inAll i = isIn i (allFin _) (λ j x → trans x (sym (inAll≡ j))) (inAll≡ i)
+ 
+
   open MOVE'EM
 
   data NormalTm : Tm → Set where
@@ -169,63 +236,6 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
   data Normal2Tm : Tm → Set where
     N2  : (xs : Vec Bool nrVars) → Normal2Tm (sumP (allFin nrVars) xs)
 
-  flip : {n : ℕ} → Fin n → Vec Bool n → Vec Bool n
-  flip zero    (x ∷ xs) = not x ∷ xs
-  flip (suc i) (x ∷ xs) = x ∷ flip i xs
-
-  data _·_∈_ {A : Set}(x : A) : {n : ℕ} → ℕ → Vec A n → Set where
-    []  : x · 0 ∈ []
-    x∷_ : {n : ℕ}{occ : ℕ}{xs : Vec A n} → x · occ ∈ xs → x · (suc occ) ∈ (x ∷ xs)
-    _∷_ : {n : ℕ}{occ : ℕ}{y : A}{xs : Vec A n} → x ≢ y → x · occ ∈ xs → x · occ ∈ (y ∷ xs)
-  
-  _∉_ : {A : Set}{n : ℕ} → A → Vec A n → Set
-  x ∉ xs = x · 0 ∈ xs
-
-  _U∈_ : {A : Set}{n : ℕ} → A → Vec A n → Set
-  x U∈ xs = x · 1 ∈ xs
-
-
-  lookupFalse : {A : Set}(x : A){n : ℕ} → (i : Fin n) → lookup i (replicate x) ≡ x 
-  lookupFalse x zero = refl
-  lookupFalse x (suc i) = lookupFalse x i
-
-  lookupFlip : {n : ℕ}(x : Fin n)(xs : Vec Bool n) → lookup x (flip x xs) ≡ not (lookup x xs)
-  lookupFlip zero (x ∷ xs) = refl
-  lookupFlip (suc x) (x₁ ∷ xs) = lookupFlip x xs
-
-  open import Data.Empty
-
-  lookupDis : {n : ℕ}(x y : Fin n)(xs : Vec Bool n) → x ≢ y → lookup x (flip y xs) ≡ lookup x xs
-  lookupDis zero zero (x ∷ xs) x≢y = ⊥-elim (x≢y refl)
-  lookupDis zero (suc y) (x ∷ xs) x≢y = refl
-  lookupDis (suc x) zero (x₁ ∷ xs) x≢y = refl
-  lookupDis (suc x) (suc y) (x₁ ∷ xs) x≢y = lookupDis x y xs (rmSuc x y x≢y)
-  
-  tabLem : {A : Set}{n : ℕ}(i : Fin n)(f : Fin n → A) → f i ≡ lookup i (tabulate f)
-  tabLem zero f    = refl
-  tabLem (suc i) f = tabLem i (λ x → f (suc x))
-
-  inAll≡ : {n : ℕ}(i : Fin n) → i ≡ lookup i (allFin n)
-  inAll≡ i = tabLem i (λ x → x)
-
-  notIn : {A : Set}{n : ℕ}{x : A}(xs : Vec A n) → ((j : Fin n) → x ≢ lookup j xs) → x ∉ xs
-  notIn [] fun = []
-  notIn (x₁ ∷ xs) fun = (fun zero) ∷ (notIn xs (λ j → fun (suc j)))
-
-  isIn : {A : Set}{n : ℕ}{x : A}(i : Fin n)(xs : Vec A n) → ((j : Fin n) → x ≡ lookup j xs → i ≡ j) → x ≡ lookup i xs → x U∈ xs
-  isIn (zero {n}) (x₁ ∷ xs) neq refl = x∷ (notIn xs fun) where
-     fun : (j : Fin n) → x₁ ≢ lookup j xs
-     fun j eq with neq (suc j) eq
-     ... | ()
-  isIn {A} (suc {n} i) (x₁ ∷ xs) neq eq = _∷_ (x≢x₁ neq) (isIn i xs (λ j x → rmSuc≡ (neq (suc j) x)) eq) where
-    x≢x₁ : ∀ {x x₁ : A} → ((j : Fin (suc n)) → x ≡ lookup j (x₁ ∷ xs) → suc i ≡ j) → x ≢ x₁
-    x≢x₁ neq' refl with neq' zero refl
-    x≢x₁ neq' refl | ()
-
-  inAll : {n : ℕ}(i : Fin n) → i U∈ allFin n
-  inAll i = isIn i (allFin _) (λ j x → trans x (sym (inAll≡ j))) (inAll≡ i)
- 
-
   tran' : Normal1Tm →N Normal2Tm
   tran' 0#              = lem (allFin nrVars) ⊢ N2 (replicate false)
     where
@@ -261,5 +271,4 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
 example :  ∀ x y → (x xor true) xor (x xor y) ≡ true xor (x xor (y xor x))
 example x y = reify (((var zero) + 1#) + (var zero + (var (suc zero)))) (1# + ((var zero) + (var (suc zero) + var zero))) {!!}
   where
-
     open Syntax 2 (x ∷ (y ∷ []))
