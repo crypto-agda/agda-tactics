@@ -1,7 +1,7 @@
 module Experiment where
 
 open import Data.Nat using (ℕ ; zero ; suc) 
-open import Data.Vec
+open import Data.Vec hiding (_∈_)
 open import Data.Bool.NP
 open import Relation.Binary.PropositionalEquality.NP
 open import Relation.Nullary
@@ -25,6 +25,10 @@ module Reduction (Tm : Set)(Res : Set)(eval : Tm → Res) where
   Reify normal = (tm tm' : Tm) →
                    NormBase.wit (normal tm) ≈ NormBase.wit (normal tm') → tm ≈ tm'
 
+  Reify≡ : {Norm : Tm → Set} → ((tm : Tm) → NormBase Norm tm) → Set
+  Reify≡ normal = (tm tm' : Tm) →
+                   NormBase.wit (normal tm) ≡ NormBase.wit (normal tm') → tm ≈ tm'
+
   NormKit : (Norm : Tm → Set) → Set
   NormKit Norm = (tm : Tm) → NormBase Norm tm
 
@@ -46,6 +50,9 @@ module Reduction (Tm : Set)(Res : Set)(eval : Tm → Res) where
 
   reify-normkit : ∀ {Norm} → (normal : NormKit Norm) → Reify normal
   reify-normkit ⟦_⟧ tm tm' ⟦tm⟧≈⟦tm'⟧ = trans (NormBase.eq ⟦ tm ⟧) (trans ⟦tm⟧≈⟦tm'⟧ (sym (NormBase.eq ⟦ tm' ⟧)))
+
+  reify≡-normkit : ∀ {Norm} → (normal : NormKit Norm) → Reify≡ normal
+  reify≡-normkit ⟦_⟧ tm tm' ⟦tm⟧≡⟦tm'⟧ = trans (eq ⟦ tm ⟧) (trans (cong eval ⟦tm⟧≡⟦tm'⟧) (sym (eq ⟦ tm' ⟧)))
 
 module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
 
@@ -87,6 +94,22 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
     sNot' : (x y : Bool) → x xor not y ≡ not (x xor y)
     sNot' true y = refl
     sNot' false y = refl
+  
+    rmSuc≡ : {n : ℕ}{i j : Fin n} → Fin.suc i ≡ suc j → i ≡ j
+    rmSuc≡ refl = refl
+
+    rmSuc : {n : ℕ} → (x y : Fin n) → Fin.suc x ≢ suc y → x ≢ y
+    rmSuc x .x neq refl = neq refl 
+
+    sym≢ : {A : Set}{x y : A} → x ≢ y → y ≢ x
+    sym≢ p = λ x → p (sym x)
+
+    cong≢ : {A B : Set}(f : A → B)(inj : {x y : A} → f x ≡ f y → x ≡ y){x y : A} → x ≢ y → f x ≢ f y
+    cong≢ f inj x≢y fx≡fy = x≢y (inj fx≡fy)
+
+    dXor3 : ∀ x {y z} → y ≡ z → x xor x xor y ≡ z
+    dXor3 true refl = sym (dNot _)
+    dXor3 false refl = refl
 
   open MOVE'EM
 
@@ -150,13 +173,17 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
   flip zero    (x ∷ xs) = not x ∷ xs
   flip (suc i) (x ∷ xs) = x ∷ flip i xs
 
-  data _∉_ {A : Set}: {n : ℕ} → A → Vec A n → Set where
-    [] : {x : A} → x ∉ []
-    _∷_ : {n : ℕ}{x y : A}{xs : Vec A n} → x ≢ y → x ∉ xs → x ∉ (y ∷ xs) 
+  data _·_∈_ {A : Set}(x : A) : {n : ℕ} → ℕ → Vec A n → Set where
+    []  : x · 0 ∈ []
+    x∷_ : {n : ℕ}{occ : ℕ}{xs : Vec A n} → x · occ ∈ xs → x · (suc occ) ∈ (x ∷ xs)
+    _∷_ : {n : ℕ}{occ : ℕ}{y : A}{xs : Vec A n} → x ≢ y → x · occ ∈ xs → x · occ ∈ (y ∷ xs)
+  
+  _∉_ : {A : Set}{n : ℕ} → A → Vec A n → Set
+  x ∉ xs = x · 0 ∈ xs
 
-  data _U∈_ {A : Set} : {n : ℕ} → A → Vec A n → Set where
-    here : {n : ℕ}{x : A}{xs : Vec A n} → x ∉ xs → x U∈ (x ∷ xs)
-    not-here : {n : ℕ}{x y : A}{xs : Vec A n} → x ≢ y → x U∈ xs → x U∈ (y ∷ xs)
+  _U∈_ : {A : Set}{n : ℕ} → A → Vec A n → Set
+  x U∈ xs = x · 1 ∈ xs
+
 
   lookupFalse : {A : Set}(x : A){n : ℕ} → (i : Fin n) → lookup i (replicate x) ≡ x 
   lookupFalse x zero = refl
@@ -168,28 +195,12 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
 
   open import Data.Empty
 
-  rmSuc≡ : {n : ℕ}{i j : Fin n} → Fin.suc i ≡ suc j → i ≡ j
-  rmSuc≡ refl = refl
-
-  rmSuc : {n : ℕ} → (x y : Fin n) → Fin.suc x ≢ suc y → x ≢ y
-  rmSuc x .x neq refl = neq refl 
-
   lookupDis : {n : ℕ}(x y : Fin n)(xs : Vec Bool n) → x ≢ y → lookup x (flip y xs) ≡ lookup x xs
   lookupDis zero zero (x ∷ xs) x≢y = ⊥-elim (x≢y refl)
   lookupDis zero (suc y) (x ∷ xs) x≢y = refl
   lookupDis (suc x) zero (x₁ ∷ xs) x≢y = refl
   lookupDis (suc x) (suc y) (x₁ ∷ xs) x≢y = lookupDis x y xs (rmSuc x y x≢y)
   
-  sym≢ : {A : Set}{x y : A} → x ≢ y → y ≢ x
-  sym≢ p = λ x → p (sym x)
-
-  cong≢ : {A B : Set}(f : A → B)(inj : {x y : A} → f x ≡ f y → x ≡ y){x y : A} → x ≢ y → f x ≢ f y
-  cong≢ f inj x≢y fx≡fy = x≢y (inj fx≡fy)
-
-  dXor3 : ∀ x {y z} → y ≡ z → x xor x xor y ≡ z
-  dXor3 true refl = sym (dNot _)
-  dXor3 false refl = refl
-
   tabLem : {A : Set}{n : ℕ}(i : Fin n)(f : Fin n → A) → f i ≡ lookup i (tabulate f)
   tabLem zero f    = refl
   tabLem (suc i) f = tabLem i (λ x → f (suc x))
@@ -202,11 +213,11 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
   notIn (x₁ ∷ xs) fun = (fun zero) ∷ (notIn xs (λ j → fun (suc j)))
 
   isIn : {A : Set}{n : ℕ}{x : A}(i : Fin n)(xs : Vec A n) → ((j : Fin n) → x ≡ lookup j xs → i ≡ j) → x ≡ lookup i xs → x U∈ xs
-  isIn (zero {n}) (x₁ ∷ xs) neq refl = here (notIn xs fun) where
+  isIn (zero {n}) (x₁ ∷ xs) neq refl = x∷ (notIn xs fun) where
      fun : (j : Fin n) → x₁ ≢ lookup j xs
      fun j eq with neq (suc j) eq
      ... | ()
-  isIn {A} (suc {n} i) (x₁ ∷ xs) neq eq = not-here (x≢x₁ neq) (isIn i xs (λ j x → rmSuc≡ (neq (suc j) x)) eq) where
+  isIn {A} (suc {n} i) (x₁ ∷ xs) neq eq = _∷_ (x≢x₁ neq) (isIn i xs (λ j x → rmSuc≡ (neq (suc j) x)) eq) where
     x≢x₁ : ∀ {x x₁ : A} → ((j : Fin (suc n)) → x ≡ lookup j (x₁ ∷ xs) → suc i ≡ j) → x ≢ x₁
     x≢x₁ neq' refl with neq' zero refl
     x≢x₁ neq' refl | ()
@@ -232,10 +243,10 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
 
       lem : {n : ℕ}{is : Vec (Fin nrVars) n} → x U∈ is
           → lookup x G xor eval (sumP is xs) ≡ eval (sumP is (flip x xs))
-      lem (here {n} {.x} {xs₁} elem) rewrite lookupFlip x xs with lookup x xs 
+      lem (x∷_ {n} .{0} {xs₁} elem) rewrite lookupFlip x xs with lookup x xs 
       ... | true  = dXor3 (lookup x G) (not-in x xs₁ elem)
       ... | false = cong (λ x₁ → lookup x G xor x₁) (not-in x xs₁ elem)
-      lem (not-here {n} {.x} {y} {xs₁} x≢y elem) rewrite lookupDis y x xs (sym≢ x≢y) with lookup y xs
+      lem (_∷_ {n} {.1} {y} {xs₁} x≢y elem) rewrite lookupDis y x xs (sym≢ x≢y) with lookup y xs
       ... | true  = lookup x G xor (lookup y G xor eval (sumP xs₁ xs)) ≡⟨ sym (Xor°.+-assoc (lookup x G) (lookup y G) (eval (sumP xs₁ xs))) ⟩ 
                     (lookup x G xor lookup y G) xor eval (sumP xs₁ xs) ≡⟨ cong (λ x₁ → x₁ xor eval (sumP xs₁ xs)) (Xor°.+-comm (lookup x G) (lookup y G)) ⟩
                     (lookup y G xor lookup x G) xor eval (sumP xs₁ xs) ≡⟨ Xor°.+-assoc (lookup y G) (lookup x G) (eval (sumP xs₁ xs)) ⟩
@@ -244,7 +255,7 @@ module Syntax (nrVars : ℕ)(G : Vec Bool nrVars) where
       ... | false = lem elem
 
   reify = reify-normkit (normal ⊢N tran ⊢N tranNorm tran')
-
+  reify≡ = reify≡-normkit (normal ⊢N tran ⊢N tranNorm tran')
 
 
 example :  ∀ x y → (x xor true) xor (x xor y) ≡ true xor (x xor (y xor x))
